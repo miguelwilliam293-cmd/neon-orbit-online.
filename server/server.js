@@ -88,6 +88,7 @@ function leaveRoom(p){const r=p.room;if(!r)return;p.room=null;r.peers.delete(p.s
 }
 function makeCode(){let c;do{c=crypto.randomBytes(4).toString('hex').slice(0,6).toUpperCase()}while(rooms.has(c));return c}
 function handle(p,m){if(!m||typeof m!=='object'||Array.isArray(m))return;
+  if(m.type==='ping'){if(Number.isFinite(m.stamp))p.send({type:'pong',stamp:m.stamp});return}
   if(m.type==='create'&&!p.room){if(rooms.size>=MAX_ROOMS){p.send({type:'error',message:'Salas lotadas'});return}const room={code:makeCode(),peers:new Map(),playing:false,created:Date.now(),started:0,lastScore:0,lastStage:1};p.slot=1;p.name=nameOf(m.name);p.room=room;room.peers.set(1,p);rooms.set(room.code,room);p.send({type:'joined',code:room.code,slot:1});lobby(room);return}
   if(m.type==='join'&&!p.room){const code=String(m.code||'').toUpperCase().replace(/[^A-F0-9]/g,'').slice(0,6),r=rooms.get(code);
     if(!r||r.playing||r.peers.size>=4){p.send({type:'error',message:'Sala não encontrada, cheia ou em andamento'});return}
@@ -100,7 +101,7 @@ function handle(p,m){if(!m||typeof m!=='object'||Array.isArray(m))return;
   if(m.type==='snapshot'&&r.playing&&p.slot===1){const now=Date.now();if(now-p.lastSnap<65)return;p.lastSnap=now;const snap=m.data;
     if(!snap||typeof snap!=='object'||Array.isArray(snap)||!Number.isFinite(snap.score)||!Number.isInteger(snap.stage)||snap.stage<1||snap.stage>9999)return;
     r.lastScore=Math.max(0,Math.min(1000000,Math.floor(snap.score)));r.lastStage=snap.stage;
-    for(const q of r.peers.values())if(q!==p&&q.socket.writableLength<55000)q.send({type:'snapshot',data:snap});return}
+    for(const q of r.peers.values())if(q!==p&&q.socket.writableLength<20000)q.send({type:'snapshot',data:snap});return}
   if(m.type==='finish'&&r.playing&&p.slot===1){r.playing=false;const duration=(Date.now()-r.started)/1000;
     let result={ok:false};if(duration>=4){result=addScore({name:p.name,score:r.lastScore,stage:r.lastStage,duration},'online',p.ip)}
     sendRoom(r,{type:'finished',score:r.lastScore,stage:r.lastStage,rankingSaved:!!result.ok});lobby(r);return}
