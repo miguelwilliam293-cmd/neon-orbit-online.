@@ -64,7 +64,7 @@ const server = http.createServer((req,res)=>{
 
 // Implementação pequena de RFC 6455 para mensagens JSON texto; clientes web sempre enviam frames mascarados.
 class Peer {
-  constructor(socket,req){this.socket=socket;this.ip=ipOf(req);this.buf=Buffer.alloc(0);this.frag=[];this.fragType=0;this.closed=false;this.room=null;this.slot=0;this.name='Orbital';this.lastInput=0;this.lastSnap=0;this.lastSeen=Date.now();socket.on('data',x=>this.receive(x));socket.on('error',()=>this.close());socket.on('close',()=>this.close());}
+  constructor(socket,req){this.socket=socket;this.ip=ipOf(req);this.buf=Buffer.alloc(0);this.frag=[];this.fragType=0;this.closed=false;this.room=null;this.slot=0;this.name='Orbital';this.lastInput=0;this.lastSnap=0;this.lastSeen=Date.now();socket.setNoDelay(true);socket.on('data',x=>this.receive(x));socket.on('error',()=>this.close());socket.on('close',()=>this.close());}
   send(obj){if(this.closed||!this.socket.writable)return;const body=Buffer.from(JSON.stringify(obj));if(body.length>65535)return;const h=body.length<126?Buffer.from([129,body.length]):Buffer.from([129,126,body.length>>8,body.length&255]);if(this.socket.writableLength>1024*1024){this.close();return}this.socket.write(Buffer.concat([h,body]));}
   control(op,data=Buffer.alloc(0)){if(this.closed||!this.socket.writable)return;this.socket.write(Buffer.concat([Buffer.from([128|op,data.length]),data]));}
   receive(data){this.lastSeen=Date.now();this.buf=Buffer.concat([this.buf,data]);if(this.buf.length>262144){this.close();return}
@@ -96,11 +96,11 @@ function handle(p,m){if(!m||typeof m!=='object'||Array.isArray(m))return;
   const r=p.room;if(!r)return;
   if(m.type==='leave'){p.send({type:'closed',message:'Você saiu da sala'});leaveRoom(p);return}
   if(m.type==='start'&&p.slot===1&&!r.playing){if(r.peers.size<2){p.send({type:'error',message:'É preciso pelo menos 2 jogadores'});return}r.playing=true;r.started=Date.now();sendRoom(r,{type:'started',players:players(r),code:r.code});return}
-  if(m.type==='input'&&r.playing&&p.slot!==1){const now=Date.now(),action=String(m.action||'');if(now-p.lastInput<65||!['flip','lane','nova'].includes(action))return;p.lastInput=now;const host=r.peers.get(1);if(host)host.send({type:'input',slot:p.slot,action});return}
+  if(m.type==='input'&&r.playing&&p.slot!==1){const now=Date.now(),action=String(m.action||'');if(now-p.lastInput<25||!['flip','lane','nova'].includes(action))return;p.lastInput=now;const host=r.peers.get(1);if(host)host.send({type:'input',slot:p.slot,action,seq:Number.isInteger(m.seq)&&m.seq>0&&m.seq<=1000000000?m.seq:0});return}
   if(m.type==='snapshot'&&r.playing&&p.slot===1){const now=Date.now();if(now-p.lastSnap<65)return;p.lastSnap=now;const snap=m.data;
     if(!snap||typeof snap!=='object'||Array.isArray(snap)||!Number.isFinite(snap.score)||!Number.isInteger(snap.stage)||snap.stage<1||snap.stage>9999)return;
     r.lastScore=Math.max(0,Math.min(1000000,Math.floor(snap.score)));r.lastStage=snap.stage;
-    for(const q of r.peers.values())if(q!==p)q.send({type:'snapshot',data:snap});return}
+    for(const q of r.peers.values())if(q!==p&&q.socket.writableLength<55000)q.send({type:'snapshot',data:snap});return}
   if(m.type==='finish'&&r.playing&&p.slot===1){r.playing=false;const duration=(Date.now()-r.started)/1000;
     let result={ok:false};if(duration>=4){result=addScore({name:p.name,score:r.lastScore,stage:r.lastStage,duration},'online',p.ip)}
     sendRoom(r,{type:'finished',score:r.lastScore,stage:r.lastStage,rankingSaved:!!result.ok});lobby(r);return}
