@@ -175,12 +175,12 @@ try{ P.init().then(function(){ P.gameLoadingFinished && P.gameLoadingFinished();
 var cv=document.getElementById("c"),ctx=cv.getContext("2d");
 var W,H,DPR,U,CX,CY,PR,OR,PL,stars=[],lowGfx=false;
 function resize(){
-  DPR=Math.min(window.devicePixelRatio||1,lowGfx?1.25:2);
+  DPR=Math.min(window.devicePixelRatio||1,lowGfx?1:2);
   W=window.innerWidth;H=window.innerHeight;
   cv.width=W*DPR;cv.height=H*DPR;ctx.setTransform(DPR,0,0,DPR,0,0);
   U=Math.min(W,H)/100;CX=W/2;CY=H/2;
   PR=U*9;OR=U*22;PL=U*2.4;           // planeta, órbita, jogador
-  stars=[];for(var i=0;i<(lowGfx?48:90);i++)stars.push({x:Math.random()*W,y:Math.random()*H,s:Math.random()*1.6+.3,t:Math.random()*6});
+  stars=[];for(var i=0;i<(lowGfx?32:90);i++)stars.push({x:Math.random()*W,y:Math.random()*H,s:Math.random()*1.6+.3,t:Math.random()*6});
 }
 window.addEventListener("resize",resize);resize();
 
@@ -210,7 +210,7 @@ var meteors=[],parts=[],rings=[],trail=[],powers=[],pops=[],fx={shield:false,slo
 var PWC={shield:"#00f0ff",slow:"#ffe14d",nova:"#ff2bd6",dbl:"#5dff8a",plasma:"#56faff",lance:"#ffdc57",thunder:"#bf84ff",laser:"#ff679f",rocket:"#ffad68",drone:"#75ffff",blade:"#f7e789",freeze:"#8fceff",heal:"#6dffab",magnet:"#fa79e9",turbo:"#ffe8a5",mirror:"#fff5bd",inferno:"#ff6131",crystal:"#af9cff",storm:"#b8aaff",timewarp:"#dbfaff",pulse:"#f1b1ff",mine:"#ffb668",comet:"#ed8aff",void:"#6a70ff",reflector:"#cffffe",overcharge:"#ffe06d",phoenix:"#ff6955"};
 var MAX_STAGE=60, endless=false, duo=false,p2={a:0,dir:-1,lane:1,alive:true,hits:2,inv:0};
 var soundOn=true,musicTick=0,raidCoins=0,bossKills=0,powerUses=0,planetsSaved=0,peakStage=1;
-var net={active:false,host:false,slot:0,code:'',ws:null,players:[],lastSnap:0,lastReceived:0,rankMode:'solo',server:'',ending:false,connecting:false,inputSeq:0,pending:[],authAng:null};
+var net={active:false,host:false,slot:0,code:'',ws:null,players:[],lastSnap:0,lastReceived:0,rankMode:'solo',server:'',ending:false,connecting:false,inputSeq:0,pending:[],authAng:null,rtt:0,lastPing:0,lastFpsAt:0,frameCount:0,fps:0};
 var netFriends={};
 function netGuest(){return net.active&&!net.host}
 function netFriendList(){return Object.keys(netFriends).map(function(k){return netFriends[k]})}
@@ -957,7 +957,7 @@ function drawSpecialBoss(){
 }
 
 /* ---------- Render ---------- */
-function glow(c,b){ctx.shadowColor=c;ctx.shadowBlur=lowGfx?Math.min(5,b*.30):b}
+function glow(c,b){ctx.shadowColor=c;ctx.shadowBlur=lowGfx?0:b}
 function draw(){
   ctx.clearRect(0,0,W,H);
   ctx.save();
@@ -993,6 +993,7 @@ function draw(){
   glow("#00f0ff",U*3);ctx.strokeStyle="rgba(0,240,255,.8)";ctx.lineWidth=2;
   ctx.beginPath();ctx.arc(CX,CY,PR*pulse+U*1.2,0,6.283);ctx.stroke();
   // Continentes, fissuras e faixas variam de acordo com o planeta.
+  if(!lowGfx){
   ctx.save();ctx.beginPath();ctx.arc(CX,CY,PR*pulse,0,6.283);ctx.clip();ctx.shadowBlur=0;
   var biome=Math.min(11,Math.floor((stage-1)/5)%12);
   for(var j2=0;j2<7;j2++){
@@ -1006,7 +1007,7 @@ function draw(){
   if(planetFracture>0){ctx.save();ctx.translate(CX,CY);ctx.strokeStyle="#ffeebc";ctx.lineWidth=U*.38;ctx.globalAlpha=planetFracture*.65;
  for(var crack=0;crack<7;crack++){var aa=crack*2.39+time*.008;ctx.beginPath();ctx.moveTo(Math.cos(aa)*PR*.15,Math.sin(aa)*PR*.15);
  ctx.lineTo(Math.cos(aa+.25)*PR*.52,Math.sin(aa+.25)*PR*.52);ctx.lineTo(Math.cos(aa+.4)*PR*1.1,Math.sin(aa+.4)*PR*1.1);ctx.stroke()}ctx.restore()}
-  ctx.restore();
+  ctx.restore();}
 
   // power-ups
   for(var w=0;w<powers.length;w++){
@@ -1187,6 +1188,7 @@ function netConnect(which){
 }
 function netMessage(m){
  if(!m||typeof m!=='object')return;
+ if(m.type==='pong'){var ms=performance.now()-Number(m.stamp);if(Number.isFinite(ms)&&ms>=0&&ms<10000)net.rtt=net.rtt?net.rtt*.7+ms*.3:ms;return}
  if(m.type==='error'){netDisplay(m.message||'Erro de conexão',true);return}
  if(m.type==='joined'){net.code=m.code;net.slot=m.slot;net.host=m.slot===1;net.ending=false;$('roomPanel').style.display='flex';$('roomCodeShow').textContent=net.code;netDisplay('Conectado à sala!');return}
  if(m.type==='lobby'){net.players=m.players||[];net.code=m.code;netRenderLobby();return}
@@ -1198,8 +1200,9 @@ function netMessage(m){
  if(m.type==='started'){
    net.players=m.players||net.players;net.active=true;net.ending=false;net.host=net.slot===1;
    $('onlinePanel').classList.remove('on');$('menu').classList.remove('on');
-   net.pending=[];net.inputSeq=0;net.lastReceived=0;net.authAng=null;
-   lowGfx=netGuest()&&Math.min(window.innerWidth,window.innerHeight)<650;resize();
+   net.pending=[];net.inputSeq=0;net.lastReceived=0;net.authAng=null;net.rtt=0;net.lastPing=0;net.lastFpsAt=0;net.frameCount=0;
+   // Reduzir custo também no HOST móvel: travamentos dele congelam o convidado.
+   lowGfx=Math.min(window.innerWidth,window.innerHeight)<650;resize();
    start(net.host?'online':'onlineGuest');
    $('onlineBadge').style.display='block';$('onlineBadge').textContent='🌐 '+net.code+' · '+net.players.length+'/4 JOGADORES';
    if(net.host){netPublish(performance.now(),true)}else netDisplay('Partida iniciada, sincronizando...');
@@ -1238,7 +1241,7 @@ function netLeave(skipClose){
  var old=net.ws;net.ws=null;
  if(skipClose&&old)try{old.close()}catch(e){}
  net.active=false;net.host=false;net.ending=false;net.slot=0;net.code='';net.players=[];netFriends={};
- net.pending=[];net.lastReceived=0;net.authAng=null;if(lowGfx){lowGfx=false;resize()}
+ net.pending=[];net.lastReceived=0;net.authAng=null;net.rtt=0;if(lowGfx){lowGfx=false;resize()}
  $('roomPanel').style.display='none';$('onlineBadge').style.display='none';
 }
 function netSetupFriends(){
@@ -1289,12 +1292,13 @@ function netSnapshot(){
    playerAlive:playerAlive,playerHits:playerHits,playerInv:playerInv,combo:combo,bump:bump,shake:shake,frenzy:frenzy,novaCharge:novaCharge,
    fx:fx,temp:temp,planetFracture:planetFracture,eventKind:eventKind,eventLife:eventLife,blackHole:blackHole,
    boss:boss,titan:titan,titanBolts:titanBolts.slice(-15).map(netPack),bossHazards:bossHazards.slice(-12),
-   meteors:meteors.slice(-60).map(netPack),powers:powers.slice(-12),trail:trail.slice(-8).map(netPack),
-   parts:parts.slice(-20).map(netPack),rings:rings.slice(-10).map(netPack),pops:pops.slice(-8).map(netPack),
+   meteors:meteors.slice(-50).map(netPack),powers:powers.slice(-12),trail:trail.slice(-3).map(netPack),
+   // Efeitos são cosméticos; transmitir poucos reduz o tráfego em 4 celulares.
+   parts:parts.slice(-6).map(netPack),rings:rings.slice(-4).map(netPack),pops:pops.slice(-4).map(netPack),
    friends:netFriendList().map(function(q){return Object.assign({},q)}),alertText:alertText,alertColor:alertColor,phaseAlert:phaseAlert};
 }
-function netPublish(now,force){if(!net.ws||net.ws.readyState!==1)return;if(!force&&now-net.lastSnap<85)return;
- if(net.ws.bufferedAmount>45000)return; // evita acumular posições antigas quando a conexão está lenta
+function netPublish(now,force){if(!net.ws||net.ws.readyState!==1)return;if(!force&&now-net.lastSnap<100)return;
+ if(net.ws.bufferedAmount>16000)return; // evita acumular posições antigas quando a conexão está lenta
  net.lastSnap=now;netSend({type:'snapshot',data:netSnapshot()})}
 function netApplySnapshot(s){
  if(!s||typeof s!=='object'||!Number.isFinite(s.ang)||!Number.isFinite(s.score)||!Number.isInteger(s.stage))return;
@@ -1332,19 +1336,24 @@ function netGuestVisualUpdate(dt){
  var now=performance.now();
  musicTick-=dt;if(musicTick<=0){musicTick=titan||boss?.54:1.2;musicPulse()}
  time+=dt;
- var age=Math.min(.25,(now-net.lastReceived)/1000),target=net.authAng+dir*speed*(age+.055);
+ // O atraso de rede varia: extrapolação com RTT medido, sem correções bruscas.
+ var age=Math.min(.28,(now-net.lastReceived)/1000);
+ var lead=Math.min(.20,.035+(net.rtt||90)/2000);
+ var target=net.authAng+dir*speed*(age+lead);
  ang+=dir*speed*dt;
  var err=Math.atan2(Math.sin(target-ang),Math.cos(target-ang));
- ang+=Math.max(-.1,Math.min(.1,err*Math.min(1,dt*7)));
+ // Corrigir no máximo 20% do avanço por quadro: nunca fazer a esfera andar para trás.
+ var maxFix=Math.abs(speed*dt)*.20;
+ ang+=Math.max(-maxFix,Math.min(maxFix,err*dt*1.6));
  netFriendList().forEach(function(q){
    if(!Number.isFinite(q.vA))q.vA=q.a;
    if(!q.alive)return;
    q.vA+=q.vDir*speed*dt;
-   // Controles ainda não confirmados são previstos, sem puxar o jogador para trás.
+   // Se o jogador acaba de inverter o sentido, sua ação local tem prioridade.
    if(q.slot===net.slot&&net.pending.length)return;
-   var target=q.a+(q.authDir||q.dir)*speed*(age+.055);
-   var err=Math.atan2(Math.sin(target-q.vA),Math.cos(target-q.vA));
-   q.vA+=Math.max(-.1,Math.min(.1,err*Math.min(1,dt*7)));
+   var friendTarget=q.a+q.authDir*speed*(age+lead);
+   var friendErr=Math.atan2(Math.sin(friendTarget-q.vA),Math.cos(friendTarget-q.vA));
+   q.vA+=Math.max(-maxFix,Math.min(maxFix,friendErr*dt*1.6));
  });
  meteors.forEach(function(m){m.x+=m.vx*dt;m.y+=m.vy*dt;m.rot+=m.rs*dt});
  titanBolts.forEach(function(q){q.t+=dt});if(titan){titan.clock+=dt;if(titan.attack)titan.attack.clock+=dt}
@@ -1404,9 +1413,21 @@ try{net.server=localStorage.getItem('neonOrbitServer')||'';$('netServer').value=
 try{var invite=new URLSearchParams(location.search).get('room');if(invite&&/^[a-fA-F0-9]{6}$/.test(invite)){$('joinCode').value=invite.toUpperCase();netOpen()}}catch(e){}
 
 /* ---------- Loop ---------- */
-var last=performance.now();
+var last=performance.now(),lastDraw=0;
 function loop(now){
-  var dt=Math.min(.05,(now-last)/1000);last=now;
+  var dt=Math.min(.05,(now-last)/1000);
+  if(net.active){
+    if(now-net.lastPing>3000&&net.ws&&net.ws.readyState===1){net.lastPing=now;netSend({type:'ping',stamp:now})}
+    if(now-net.lastFpsAt>1100){
+      net.fps=Math.round(net.frameCount*1000/Math.max(1,now-net.lastFpsAt));net.frameCount=0;net.lastFpsAt=now;
+      if(!lowGfx&&Math.min(window.innerWidth,window.innerHeight)<850&&net.fps<28){lowGfx=true;resize()}
+      $('onlineBadge').textContent='🌐 '+net.code+' · '+net.players.length+'/4 · '+net.fps+' FPS · '+(net.rtt?Math.round(net.rtt)+'ms':'ping ...');
+    }
+  }
+  // No modo econômico, 30 desenhos por segundo evitam sobrecarga de GPU nos celulares.
+  if(lowGfx&&now-lastDraw<32){requestAnimationFrame(loop);return}
+  lastDraw=now;last=now;
+  if(net.active)net.frameCount++;
   if(netGuest())netGuestVisualUpdate(dt);else update(dt);
   if(net.active&&net.host&&state==="play")netPublish(now);
   draw();requestAnimationFrame(loop);
