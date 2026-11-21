@@ -59,7 +59,7 @@ const server = http.createServer((req,res)=>{
   if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});
   let p=path.join(PUBLIC_DIR,pathname==='/'?'index.html':pathname);
   if(!p.startsWith(PUBLIC_DIR+path.sep))return json(res,403,{error:'Acesso negado'});
-  fs.readFile(p,(err,data)=>{if(err)return json(res,404,{error:'Não encontrado'});res.writeHead(200,{'content-type':mime[path.extname(p)]||'application/octet-stream','x-content-type-options':'nosniff'});res.end(data)});
+  fs.readFile(p,(err,data)=>{if(err)return json(res,404,{error:'Não encontrado'});res.writeHead(200,{'content-type':mime[path.extname(p)]||'application/octet-stream','cache-control':p.endsWith('.html')?'no-store':'public, max-age=120','x-content-type-options':'nosniff'});res.end(data)});
 });
 
 // Implementação pequena de RFC 6455 para mensagens JSON texto; clientes web sempre enviam frames mascarados.
