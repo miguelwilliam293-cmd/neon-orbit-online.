@@ -173,14 +173,14 @@ try{ P.init().then(function(){ P.gameLoadingFinished && P.gameLoadingFinished();
 
 /* ---------- Setup ---------- */
 var cv=document.getElementById("c"),ctx=cv.getContext("2d");
-var W,H,DPR,U,CX,CY,PR,OR,PL,stars=[];
+var W,H,DPR,U,CX,CY,PR,OR,PL,stars=[],lowGfx=false;
 function resize(){
-  DPR=Math.min(window.devicePixelRatio||1,2);
+  DPR=Math.min(window.devicePixelRatio||1,lowGfx?1.25:2);
   W=window.innerWidth;H=window.innerHeight;
   cv.width=W*DPR;cv.height=H*DPR;ctx.setTransform(DPR,0,0,DPR,0,0);
   U=Math.min(W,H)/100;CX=W/2;CY=H/2;
   PR=U*9;OR=U*22;PL=U*2.4;           // planeta, órbita, jogador
-  stars=[];for(var i=0;i<90;i++)stars.push({x:Math.random()*W,y:Math.random()*H,s:Math.random()*1.6+.3,t:Math.random()*6});
+  stars=[];for(var i=0;i<(lowGfx?48:90);i++)stars.push({x:Math.random()*W,y:Math.random()*H,s:Math.random()*1.6+.3,t:Math.random()*6});
 }
 window.addEventListener("resize",resize);resize();
 
@@ -210,7 +210,7 @@ var meteors=[],parts=[],rings=[],trail=[],powers=[],pops=[],fx={shield:false,slo
 var PWC={shield:"#00f0ff",slow:"#ffe14d",nova:"#ff2bd6",dbl:"#5dff8a",plasma:"#56faff",lance:"#ffdc57",thunder:"#bf84ff",laser:"#ff679f",rocket:"#ffad68",drone:"#75ffff",blade:"#f7e789",freeze:"#8fceff",heal:"#6dffab",magnet:"#fa79e9",turbo:"#ffe8a5",mirror:"#fff5bd",inferno:"#ff6131",crystal:"#af9cff",storm:"#b8aaff",timewarp:"#dbfaff",pulse:"#f1b1ff",mine:"#ffb668",comet:"#ed8aff",void:"#6a70ff",reflector:"#cffffe",overcharge:"#ffe06d",phoenix:"#ff6955"};
 var MAX_STAGE=60, endless=false, duo=false,p2={a:0,dir:-1,lane:1,alive:true,hits:2,inv:0};
 var soundOn=true,musicTick=0,raidCoins=0,bossKills=0,powerUses=0,planetsSaved=0,peakStage=1;
-var net={active:false,host:false,slot:0,code:'',ws:null,players:[],lastSnap:0,lastReceived:0,rankMode:'solo',server:'',ending:false,connecting:false};
+var net={active:false,host:false,slot:0,code:'',ws:null,players:[],lastSnap:0,lastReceived:0,rankMode:'solo',server:'',ending:false,connecting:false,inputSeq:0,pending:[],authAng:null};
 var netFriends={};
 function netGuest(){return net.active&&!net.host}
 function netFriendList(){return Object.keys(netFriends).map(function(k){return netFriends[k]})}
@@ -437,13 +437,13 @@ function awardPoints(n,chain){
  if(stage%5!==0 && stagePts>=phaseTarget())nextStage();
 }
 function switchLane(){
- if(netGuest()){netSend({type:"input",action:"lane"});return}
+ if(netGuest()){netGuestAction('lane');return}
  if(state!=="play"||!playerAlive)return;
  var a=pos();lane=1-lane;var b=pos();rings.push({x:a.x,y:a.y,r:PL,a:1});burst(b.x,b.y,16,"#87faff",U*18);trail=[];
  beep(lane?450:630,.11,"triangle",.06,1.3);refreshHUD();
 }
 function launchNova(){
- if(netGuest()){netSend({type:"input",action:"nova"});return}
+ if(netGuest()){netGuestAction('nova');return}
  if(state!=="play"||novaCharge<100)return;
  novaCharge=0;
  var n=meteors.length;for(var i=0;i<n;i++)burst(meteors[i].x,meteors[i].y,8,"#ff2bd6",U*18);
@@ -489,7 +489,7 @@ function start(mode){
   beep(520,.18,"triangle",.07,2);
 }
 function flip(){
-  if(netGuest()){netSend({type:"input",action:"flip"});return}
+  if(netGuest()){netGuestAction('flip');return}
   if(state!=="play"||!playerAlive)return;
   dir=-dir;
   var p=pos();rings.push({x:p.x,y:p.y,r:PL,a:1});
@@ -957,7 +957,7 @@ function drawSpecialBoss(){
 }
 
 /* ---------- Render ---------- */
-function glow(c,b){ctx.shadowColor=c;ctx.shadowBlur=b}
+function glow(c,b){ctx.shadowColor=c;ctx.shadowBlur=lowGfx?Math.min(5,b*.30):b}
 function draw(){
   ctx.clearRect(0,0,W,H);
   ctx.save();
@@ -1092,7 +1092,7 @@ function draw(){
   // Companheiros conectados via WebSocket, posições sincronizadas pelo anfitrião.
   if(net.active&&(state==="play"||state==="dying")){
     var palette={2:"#ffc66d",3:"#7af7bb",4:"#cd94ff"};
-    netFriendList().forEach(function(q){if(!q.alive)return;var np=point(q.a,q.lane),nc=palette[q.slot]||"#fff";
+    netFriendList().forEach(function(q){if(!q.alive)return;var np=point(netGuest()&&Number.isFinite(q.vA)?q.vA:q.a,netGuest()&&Number.isInteger(q.vLane)?q.vLane:q.lane),nc=palette[q.slot]||"#fff";
       ctx.save();glow(nc,U*5);ctx.fillStyle=nc;ctx.strokeStyle="#ffffff";ctx.lineWidth=U*.32;
       ctx.beginPath();ctx.arc(np.x,np.y,PL*1.12,0,Math.PI*2);ctx.fill();ctx.stroke();
       ctx.font="900 "+U*1.9+"px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillStyle="#140b24";ctx.fillText(q.slot,np.x,np.y);
@@ -1161,7 +1161,10 @@ function netOpen(){
  $('onlinePanel').classList.add('on');$('roomPanel').style.display=net.code?'flex':'none';
  if(!net.code)netDisplay('Crie uma sala ou entre com o código de seis caracteres.');
 }
-function netSend(data){if(net.ws&&net.ws.readyState===1){try{net.ws.send(JSON.stringify(data));return true}catch(e){}}return false}
+function netSend(data){if(net.ws&&net.ws.readyState===1){try{
+  // Arredondar coordenadas e timers reduz o tráfego sem afetar a jogabilidade.
+  net.ws.send(JSON.stringify(data,data.type==='snapshot'?function(k,v){return typeof v==='number'&&Number.isFinite(v)&&!Number.isInteger(v)?Math.round(v*1000)/1000:v}:undefined));return true
+ }catch(e){}}return false}
 function netConnect(which){
  if(net.ws&&net.ws.readyState<=1){netDisplay('Conexão em andamento ou sala já conectada.',true);return}
  var base=netRemember();if(!base){netDisplay('Informe a URL HTTPS do servidor ou abra o jogo pelo servidor.',true);return}
@@ -1194,13 +1197,17 @@ function netMessage(m){
  if(m.type==='closed'){netLeave(true);netDisplay(m.message||'Sala fechada.',true);if(state==='play'){state='menu';$('menu').classList.add('on');$('hud').style.display='none';$('actions').style.display='none';$('onlinePanel').classList.add('on')};return}
  if(m.type==='started'){
    net.players=m.players||net.players;net.active=true;net.ending=false;net.host=net.slot===1;
-   $('onlinePanel').classList.remove('on');$('menu').classList.remove('on');start(net.host?'online':'onlineGuest');
+   $('onlinePanel').classList.remove('on');$('menu').classList.remove('on');
+   net.pending=[];net.inputSeq=0;net.lastReceived=0;net.authAng=null;
+   lowGfx=netGuest()&&Math.min(window.innerWidth,window.innerHeight)<650;resize();
+   start(net.host?'online':'onlineGuest');
    $('onlineBadge').style.display='block';$('onlineBadge').textContent='🌐 '+net.code+' · '+net.players.length+'/4 JOGADORES';
    if(net.host){netPublish(performance.now(),true)}else netDisplay('Partida iniciada, sincronizando...');
    return;
  }
  if(m.type==='input'&&net.active&&net.host){
    var q=netFriends[m.slot];if(!q||!q.alive||state!=='play')return;
+   if(Number.isInteger(m.seq)&&m.seq>=1)q.lastSeq=Math.max(q.lastSeq||0,m.seq);
    if(m.action==='flip'){q.dir*=-1;var pt=point(q.a,q.lane);burst(pt.x,pt.y,8,'#ffcd83',U*13)}
    if(m.action==='lane'){q.lane=1-q.lane;var pp=point(q.a,q.lane);burst(pp.x,pp.y,13,'#a0faff',U*16)}
    if(m.action==='nova')launchNova();return;
@@ -1231,11 +1238,12 @@ function netLeave(skipClose){
  var old=net.ws;net.ws=null;
  if(skipClose&&old)try{old.close()}catch(e){}
  net.active=false;net.host=false;net.ending=false;net.slot=0;net.code='';net.players=[];netFriends={};
+ net.pending=[];net.lastReceived=0;net.authAng=null;if(lowGfx){lowGfx=false;resize()}
  $('roomPanel').style.display='none';$('onlineBadge').style.display='none';
 }
 function netSetupFriends(){
  netFriends={};
- net.players.forEach(function(pl){if(pl.slot!==1){netFriends[pl.slot]={slot:pl.slot,name:pl.name,a:-Math.PI/2+pl.slot*1.7,dir:pl.slot%2?-1:1,lane:pl.slot%2,alive:true,hits:2+up('resistencia'),inv:0}}});
+ net.players.forEach(function(pl){if(pl.slot!==1){netFriends[pl.slot]={slot:pl.slot,name:pl.name,a:-Math.PI/2+pl.slot*1.7,dir:pl.slot%2?-1:1,lane:pl.slot%2,alive:true,hits:2+up('resistencia'),inv:0,lastSeq:0}}});
 }
 function receiveNetHit(slot){
  if(!net.active||!net.host||state!=='play')return;
@@ -1263,42 +1271,88 @@ function netPack(o){if(!o)return o;var r=Object.assign({},o);if(typeof r.x==='nu
  if(typeof r.vx==='number')r.vx/=U;if(typeof r.vy==='number')r.vy/=U;if(typeof r.r==='number')r.r/=U;if(typeof r.s==='number')r.s/=U;return r}
 function netUnpack(o){if(!o)return o;var r=Object.assign({},o);if(typeof r.x==='number')r.x=CX+r.x*U;if(typeof r.y==='number')r.y=CY+r.y*U;
  if(typeof r.vx==='number')r.vx*=U;if(typeof r.vy==='number')r.vy*=U;if(typeof r.r==='number')r.r*=U;if(typeof r.s==='number')r.s*=U;return r}
+// Predição imediata dos controles do convidado: o servidor continua sendo autoritativo.
+function netGuestAction(action){
+ if(!netGuest()||state!=='play')return false;
+ var seq=++net.inputSeq;
+ if(!netSend({type:'input',action:action,seq:seq}))return false;
+ var q=netFriends[net.slot];
+ if(q&&q.alive&&(action==='flip'||action==='lane')){
+   net.pending.push({seq:seq,action:action,t:performance.now()});
+   if(action==='flip'){q.dir*=-1;q.vDir=q.dir}
+   else {q.lane=1-q.lane;q.vLane=q.lane}
+ }
+ return true;
+}
 function netSnapshot(){
  return {time:time,score:score,stage:stage,stagePts:stagePts,ang:ang,dir:dir,lane:lane,speed:speed,
    playerAlive:playerAlive,playerHits:playerHits,playerInv:playerInv,combo:combo,bump:bump,shake:shake,frenzy:frenzy,novaCharge:novaCharge,
    fx:fx,temp:temp,planetFracture:planetFracture,eventKind:eventKind,eventLife:eventLife,blackHole:blackHole,
    boss:boss,titan:titan,titanBolts:titanBolts.slice(-15).map(netPack),bossHazards:bossHazards.slice(-12),
-   meteors:meteors.slice(-85).map(netPack),powers:powers.slice(-12),trail:trail.slice(-16).map(netPack),
-   parts:parts.slice(-65).map(netPack),rings:rings.slice(-25).map(netPack),pops:pops.slice(-10).map(netPack),
+   meteors:meteors.slice(-60).map(netPack),powers:powers.slice(-12),trail:trail.slice(-8).map(netPack),
+   parts:parts.slice(-20).map(netPack),rings:rings.slice(-10).map(netPack),pops:pops.slice(-8).map(netPack),
    friends:netFriendList().map(function(q){return Object.assign({},q)}),alertText:alertText,alertColor:alertColor,phaseAlert:phaseAlert};
 }
-function netPublish(now,force){if(!net.ws||net.ws.readyState!==1)return;if(!force&&now-net.lastSnap<100)return;net.lastSnap=now;netSend({type:'snapshot',data:netSnapshot()})}
+function netPublish(now,force){if(!net.ws||net.ws.readyState!==1)return;if(!force&&now-net.lastSnap<85)return;
+ if(net.ws.bufferedAmount>45000)return; // evita acumular posições antigas quando a conexão está lenta
+ net.lastSnap=now;netSend({type:'snapshot',data:netSnapshot()})}
 function netApplySnapshot(s){
  if(!s||typeof s!=='object'||!Number.isFinite(s.ang)||!Number.isFinite(s.score)||!Number.isInteger(s.stage))return;
- net.lastReceived=performance.now();
- time=s.time||0;score=s.score;stage=s.stage;stagePts=s.stagePts||0;ang=s.ang;dir=s.dir;lane=s.lane;speed=s.speed;
+ var now=performance.now(),previous=netFriends;
+ // Ângulo do anfitrião também é corrigido suavemente; não reposicionar a cada pacote.
+ if(net.lastReceived===0)ang=s.ang;
+ net.authAng=s.ang;net.lastReceived=now;
+ time=s.time||0;score=s.score;stage=s.stage;stagePts=s.stagePts||0;dir=s.dir;lane=s.lane;speed=s.speed;
  playerAlive=s.playerAlive;playerHits=s.playerHits;playerInv=s.playerInv||0;combo=s.combo||0;bump=s.bump||0;shake=s.shake||0;frenzy=s.frenzy||0;novaCharge=s.novaCharge||0;
  fx=s.fx||fx;temp=s.temp||temp;planetFracture=s.planetFracture||0;eventKind=s.eventKind||'';eventLife=s.eventLife||0;blackHole=s.blackHole||null;
  boss=s.boss||null;titan=s.titan||null;bossHazards=s.bossHazards||[];
  titanBolts=(s.titanBolts||[]).map(netUnpack);meteors=(s.meteors||[]).map(netUnpack);powers=s.powers||[];trail=(s.trail||[]).map(netUnpack);
  parts=(s.parts||[]).map(netUnpack);rings=(s.rings||[]).map(netUnpack);pops=(s.pops||[]).map(netUnpack);
- netFriends={};(s.friends||[]).forEach(function(q){if(q.slot>1&&q.slot<=4)netFriends[q.slot]=q});
+ var friends={};
+ (s.friends||[]).forEach(function(authority){
+   if(authority.slot<=1||authority.slot>4)return;
+   var q=Object.assign({},authority),old=previous[q.slot];
+   q.authDir=q.dir;
+   if(q.slot===net.slot){
+     var ack=q.lastSeq||0;
+     net.pending=net.pending.filter(function(p){return p.seq>ack&&now-p.t<1200});
+     net.pending.forEach(function(p){if(p.action==='flip')q.dir*=-1;else if(p.action==='lane')q.lane=1-q.lane});
+   }
+   q.vA=old&&Number.isFinite(old.vA)?old.vA:q.a;
+   q.vDir=q.dir;q.vLane=q.lane;
+   friends[q.slot]=q;
+ });
+ netFriends=friends;
  alertText=s.alertText||'';alertColor=s.alertColor||'#fff';phaseAlert=s.phaseAlert||0;
- refreshHUD();
+ // O HUD é atualizado em intervalos no loop, evitando reflow 12 vezes por segundo.
 }
 function netGuestVisualUpdate(dt){
- // Apenas interpolação gráfica; colisões, vida e chefões são calculados pelo anfitrião.
+ // Simulação somente visual: o anfitrião é responsável por dano e colisões.
  if(net.lastReceived===0)return;
+ var now=performance.now();
  musicTick-=dt;if(musicTick<=0){musicTick=titan||boss?.54:1.2;musicPulse()}
- time+=dt;ang+=dir*speed*dt;
- netFriendList().forEach(function(q){if(q.alive)q.a+=q.dir*speed*dt});
+ time+=dt;
+ var age=Math.min(.25,(now-net.lastReceived)/1000),target=net.authAng+dir*speed*(age+.055);
+ ang+=dir*speed*dt;
+ var err=Math.atan2(Math.sin(target-ang),Math.cos(target-ang));
+ ang+=Math.max(-.1,Math.min(.1,err*Math.min(1,dt*7)));
+ netFriendList().forEach(function(q){
+   if(!Number.isFinite(q.vA))q.vA=q.a;
+   if(!q.alive)return;
+   q.vA+=q.vDir*speed*dt;
+   // Controles ainda não confirmados são previstos, sem puxar o jogador para trás.
+   if(q.slot===net.slot&&net.pending.length)return;
+   var target=q.a+(q.authDir||q.dir)*speed*(age+.055);
+   var err=Math.atan2(Math.sin(target-q.vA),Math.cos(target-q.vA));
+   q.vA+=Math.max(-.1,Math.min(.1,err*Math.min(1,dt*7)));
+ });
  meteors.forEach(function(m){m.x+=m.vx*dt;m.y+=m.vy*dt;m.rot+=m.rs*dt});
  titanBolts.forEach(function(q){q.t+=dt});if(titan){titan.clock+=dt;if(titan.attack)titan.attack.clock+=dt}
  if(boss){boss.t+=dt;boss.rot+=dt*.7;boss.a+=dt*.22};bossHazards.forEach(function(h){h.t+=dt});
  parts.forEach(function(p){p.x+=p.vx*dt;p.y+=p.vy*dt;p.l+=dt});rings.forEach(function(r){r.r+=dt*U*60;r.a=Math.max(0,r.a-dt*3.2)});
  if(phaseAlert>0)phaseAlert=Math.max(0,phaseAlert-dt);
  netGuestHudT-=dt;if(netGuestHudT<=0){refreshHUD();netGuestHudT=.25}
- if(performance.now()-net.lastReceived>7000){netDisplay('A sincronização parou. Verifique sua conexão.',true)}
+ if(now-net.lastReceived>7000){netDisplay('A sincronização parou. Verifique sua conexão.',true)}
 }
 function netFinish(){
  if(!net.active||!net.host||net.ending)return;
